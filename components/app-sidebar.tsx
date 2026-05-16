@@ -22,6 +22,8 @@ import { ErdResponse } from "@/lib/ai"
 export function AppSidebar({
   ...props
 }: React.ComponentProps<typeof Sidebar>) {
+  const syncBtn = React.useRef<HTMLButtonElement>(null)
+  
   const [aiPrompt, setAiPrompt] =
     React.useState("")
 
@@ -83,9 +85,7 @@ export function AppSidebar({
 
         setErdText(response.response.erd)
 
-        setTimeout(() => {
-          persistFlow()
-        }, 0)
+        syncBtn.current?.click()
       } catch (error) {
         console.log(error)
 
@@ -164,6 +164,7 @@ export function AppSidebar({
                 persistFlow()
               }, 0)
             }}
+            ref={syncBtn}
           >
             Sync Diagram
           </Button>
