@@ -17,8 +17,6 @@ import { useFlowStore } from "@/store/flow-store"
 
 import { useParams } from "next/navigation"
 
-import { ErdResponse } from "@/lib/ai"
-
 export function AppSidebar({
   ...props
 }: React.ComponentProps<typeof Sidebar>) {
@@ -66,26 +64,63 @@ export function AppSidebar({
       setLoading(true)
 
       try {
-        const response =
-          await fetch(
-            "/api/ai-response",
-            {
-              method: "POST",
+        const response = await fetch(
+          "/api/ai-response",
+          {
+            method: "POST",
+            headers: {
+              "Content-Type":
+                "application/json",
+            },
+            body: JSON.stringify({
+              prompt: aiPrompt,
+            }),
+          }
+        )
 
-              headers: {
-                "Content-Type":
-                  "application/json",
-              },
+        if (!response.body)
+          throw new Error(
+            "No response body"
+          )
 
-              body: JSON.stringify({
-                prompt: aiPrompt,
-              }),
+        const reader =
+          response.body.getReader()
+        const decoder = new TextDecoder()
+        let erdAccumulated = ""
+        let buffer = ""
+
+        while (true) {
+          const { done, value } =
+            await reader.read()
+          if (done) break
+
+          buffer += decoder.decode(
+            value,
+            { stream: true }
+          )
+          const lines = buffer.split("\n")
+          buffer = lines.pop() ?? ""
+
+          for (const line of lines) {
+            if (!line.trim()) continue
+
+            try {
+              const data = JSON.parse(line)
+              if (data.error)
+                throw new Error(data.error)
+
+              if (data.text) {
+                erdAccumulated += data.text
+                setErdText(erdAccumulated)
+                useFlowStore
+                  .getState()
+                  .syncFromErd()
+              }
+            } catch {
+              // skip partial lines
             }
-          ).then((res) => res.json())
-
-        setErdText(response.response.erd)
-
-        syncBtn.current?.click()
+          }
+        }
       } catch (error) {
         console.log(error)
 

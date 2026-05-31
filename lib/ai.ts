@@ -3,68 +3,38 @@ import { z } from "zod";
 
 export const ErdResponseSchema = z.object({
   title: z.string(),
-
   description: z.string(),
-
   erd: z.string(),
-
-  tables: z.array(
-    z.object({
-      name: z.string(),
-
-      fields: z.array(
-        z.object({
-          name: z.string(),
-
-          type: z.string(),
-
-          constraints: z.array(z.string()).optional(),
-
-          relation: z
-            .object({
-              table: z.string(),
-              field: z.string(),
-            })
-            .optional(),
-        })
-      ),
-    })
-  ),
 });
 
-export type ErdResponse = z.infer<
-  typeof ErdResponseSchema
->;
+export type ErdResponse = z.infer<typeof ErdResponseSchema>;
 
 const SYSTEM_PROMPT = `
 You are an expert database architect and ERD generation engine.
 
-Your task is to generate clean, production-grade database schemas from natural language prompts.
-
-You MUST think like a senior backend engineer.
+Generate production-grade normalized database schemas from natural language requirements.
 
 Rules:
 
-1. Always generate normalized schemas.
+1. Use UUID primary keys.
+2. Every table should contain:
+   - id uuid pk
+   - createdAt timestamp
+   - updatedAt timestamp
+3. Use proper foreign keys and relationships.
+4. Use junction tables for many-to-many relationships.
+5. Use concise naming conventions.
+6. Supported types:
+   - uuid
+   - string
+   - text
+   - int
+   - float
+   - boolean
+   - timestamp
+   - json
 
-2. Prefer UUIDs for primary keys.
-
-3. Every table should have:
-- id uuid pk
-- createdAt timestamp
-- updatedAt timestamp
-
-unless explicitly unnecessary.
-
-4. Use realistic relational modeling:
-- one-to-many
-- many-to-many
-- foreign keys
-- junction tables
-
-5. Use concise and scalable naming conventions.
-
-6. The ERD output MUST follow this exact DSL format:
+ERD DSL format:
 
 user {
   id uuid pk
@@ -77,155 +47,130 @@ post {
   title string
 }
 
-7. Foreign keys MUST use:
+Foreign keys must use:
+
 fk > table.field
 
-8. Constraints allowed:
+Constraints:
 - pk
 - fk
 - unique
 - nullable
 
-9. Supported primitive types:
-- uuid
-- string
-- text
-- int
-- float
-- boolean
-- timestamp
-- json
+Return ONLY valid JSON.
 
-10. Return ONLY valid JSON.
-
-11. Do not explain anything.
-
-12. Generate enough tables to properly model the system.
-
-13. Think carefully about relationships before generating.
-
-14. The "erd" field should contain the full ERD DSL string.
-
-15. The "tables" field should contain structured parsed output matching the ERD.
-
+The "erd" field must contain the complete ERD DSL.
 `;
+
+const JSON_SCHEMA = {
+  type: "object",
+  properties: {
+    title: {
+      type: "string",
+    },
+    description: {
+      type: "string",
+    },
+    erd: {
+      type: "string",
+    },
+  },
+  required: ["title", "description", "erd"],
+} as const;
+
+function buildConfig() {
+  return {
+    responseMimeType: "application/json" as const,
+    responseJsonSchema: JSON_SCHEMA,
+  };
+}
 
 export async function getAiResponse(
   apiKey: string,
   prompt: string
-) {
-  const ai = new GoogleGenAI({
-    apiKey,
-  });
+): Promise<ErdResponse> {
+  const ai = new GoogleGenAI({ apiKey });
 
-  const response =
-    await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
-
-      contents: `
+  const response = await ai.models.generateContent({
+    model: "gemini-3-flash-preview",
+    contents: `
 ${SYSTEM_PROMPT}
 
 USER REQUEST:
 ${prompt}
 `,
-
-      config: {
-        responseMimeType: "application/json",
-
-        responseJsonSchema: {
-          type: "object",
-
-          properties: {
-            title: {
-              type: "string",
-            },
-
-            description: {
-              type: "string",
-            },
-
-            erd: {
-              type: "string",
-            },
-
-            tables: {
-              type: "array",
-
-              items: {
-                type: "object",
-
-                properties: {
-                  name: {
-                    type: "string",
-                  },
-
-                  fields: {
-                    type: "array",
-
-                    items: {
-                      type: "object",
-
-                      properties: {
-                        name: {
-                          type: "string",
-                        },
-
-                        type: {
-                          type: "string",
-                        },
-
-                        constraints: {
-                          type: "array",
-
-                          items: {
-                            type: "string",
-                          },
-                        },
-
-                        relation: {
-                          type: "object",
-
-                          properties: {
-                            table: {
-                              type: "string",
-                            },
-
-                            field: {
-                              type: "string",
-                            },
-                          },
-                        },
-                      },
-
-                      required: [
-                        "name",
-                        "type",
-                      ],
-                    },
-                  },
-                },
-
-                required: [
-                  "name",
-                  "fields",
-                ],
-              },
-            },
-          },
-
-          required: [
-            "title",
-            "description",
-            "erd",
-            "tables",
-          ],
-        },
-      },
-    });
+    config: buildConfig(),
+  });
 
   const text = response.text ?? "{}";
 
-  const parsed = JSON.parse(text);
+  return ErdResponseSchema.parse(JSON.parse(text));
+}
 
-  return ErdResponseSchema.parse(parsed);
+const STREAM_SYSTEM_PROMPT = `
+You are an expert database architect.
+
+Generate production-grade normalized database schemas.
+
+Rules:
+
+1. Use UUID primary keys.
+2. Include createdAt and updatedAt timestamps.
+3. Use proper foreign keys.
+4. Use junction tables for many-to-many relationships.
+5. Use concise naming conventions.
+6. Supported types:
+   - uuid
+   - string
+   - text
+   - int
+   - float
+   - boolean
+   - timestamp
+   - json
+
+ERD DSL format:
+
+user {
+  id uuid pk
+  name string
+}
+
+post {
+  id uuid pk
+  userId uuid fk > user.id
+  title string
+}
+
+Foreign keys must use:
+
+fk > table.field
+
+Output ONLY raw ERD DSL.
+No JSON.
+No markdown.
+No explanations.
+`;
+
+export async function* getAiResponseStream(
+  apiKey: string,
+  prompt: string
+): AsyncGenerator<string> {
+  const ai = new GoogleGenAI({ apiKey });
+
+  const response = await ai.models.generateContentStream({
+    model: "gemini-3-flash-preview",
+    contents: `
+${STREAM_SYSTEM_PROMPT}
+
+USER REQUEST:
+${prompt}
+`,
+  });
+
+  for await (const chunk of response) {
+    if (chunk.text) {
+      yield chunk.text;
+    }
+  }
 }
